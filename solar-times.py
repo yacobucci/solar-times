@@ -1,115 +1,239 @@
 import json
+import logging
 import sched
-
+import sys
 import urllib.parse
 import urllib.request
+import uuid
+import yaml
 
 from datetime import date
 from datetime import datetime
 from datetime import time
 from datetime import timedelta
 
-from pprint import *
+from pprint import pformat
 
-from picamera2 import Picamera2
-from libcamera import controls
+# XXX holding back until figure out how to approximate rpicam-still
+#from picamera2 import Picamera2
+#from libcamera import controls
 
-location = 'https://api.sunrise-sunset.org/json?'
+# Info - API parameters
+#location = 'https://api.sunrise-sunset.org/json?'
+#lat = 39.7592537
+#lng = -105.1230315
+#tzid = 'America/Denver'
+#formatted = 0
 
-lat = 39.7592537
-lng = -105.1230315
-tzid = 'America/Denver'
-formatted = 0
+# XXX Known issues
+# 
+# Restart: if event do or do not fire, a restart can clobber photos
+# Event takes photo 1
+# Writes current frame 1
+# Restarts
+# Next event will be photo and frame 1 as read in from config
+# 
+# Config should always hold the next frame, not the current frame.
+# Implemented potential fix is save_config in the post processing step
 
-today = date.today()
-tomorrow = today + timedelta(days=1)
-tomorrow_morning = datetime.combine(tomorrow, time(hour=1))
+# XXX take from CLI
+bootstrap_config = '/home/pi/dev/python/solar-times/config.yaml'
+# XXX take from CLI
+logger_file = '/home/pi/dev/python/solar-times/solar.log'
 
-print("Meta: tomorrow: {} morning: {}  Params: lat: {} lng: {} date: {} tzid: {} format: {}".format(tomorrow.__str__(), tomorrow_morning, lat, lng, today.__str__(), tzid, formatted))
+logger = logging.getLogger(__name__)
+logging.basicConfig(filename=logger_file, encoding='utf-8', level=logging.DEBUG,
+                    format='%(levelname)s %(asctime)s : %(message)s')
+logger.debug('logger initialized')
 
-params = {
+config = dict()
+def load_config(filename):
+    try:
+        with open(filename, 'r') as f:
+            data = yaml.load(f, Loader=yaml.FullLoader)
+            return data
+    except Exception as ex:
+        logger.error('cannot load config file: %s', ex)
+        sys.exit(1)
+
+def save_config(config, filename):
+    try:
+        with open(filename, 'w') as f:
+            yaml.dump(config, f)
+    except Exception as ex:
+        logger.error('cannot save config file: %s', ex)
+        sys.exit(1)
+
+def get_times(location = '', day = date.today(), lat = 0, lng = 0, tzid = '', formatted = 0):
+    params = {
         'lat': lat,
         'lng': lng,
-        'date': today.__str__(),
+        'date': day.__str__(),
         'tzid': tzid,
         'formatted': formatted
-}
+    }
 
-endpoint = location + urllib.parse.urlencode(params)
+    endpoint = location + urllib.parse.urlencode(params)
 
-print(endpoint)
+    logger.info('calling api endpoint %s for times', endpoint)
+    contents = urllib.request.urlopen(endpoint)
+    if contents.status != 200:
+        # XXX type the exception
+        raise Exception('api called failed, endpoint {} status {}'.format(endpoint,
+                                                                          contents.status))
 
-contents = urllib.request.urlopen(endpoint)
-if contents.status != 200:
-    print("I'm a failure...")
-    exit(1)
-else:
-    print("Succeeding, for now...")
+    if contents.headers['content-type'] != 'application/json':
+        raise Exception("unsupported content-type {} want 'application/json".format(
+               contents.headers['content-type']))
 
-if contents.headers['content-type'] != 'application/json':
-    print("Unsupported content-type")
-    exit(1)
+    data = contents.read()
+    times = json.loads(data)
 
-data = contents.read()
-times = json.loads(data)
+    logger.debug('results: %s', times)
+    return times['results']
 
-print(times)
+# XXX update
+#    logging
+#    post process call
+#    proper library usage
+#def take_pic(meta = 'unset', filename = ''):
+#    print(meta)
+#    with Picamera2() as camera:
+#        pprint(camera.sensor_modes)
+#
+#        camera_config = camera.create_still_configuration(main={"size":(4608, 2592)})
+#        camera.configure(camera_config)
+#        camera.set_controls({"AfMode": controls.AfModeEnum.Continuous})
+#        camera.start()
+#
+#        camera.capture_file(filename)
+#        camera.stop()
 
-#echo 'touch $(date)' | at -t $(echo 2024-10-11T19:27:51-06:00 | sed -e 's/-\([^-]*\)$//' -e 's/-//g' -e 's/T//' -e 's/://' -e 's/:/./')
+def call_rpicam_app(meta = 'unset', filename = '', post_process = None):
+    logger.debug('call_rpicam_app %s', meta)
 
-def take_pic(meta = 'unset', frame = 0):
-    print(meta)
-    with Picamera2() as camera:
-        pprint(camera.sensor_modes)
+    import subprocess
 
-        camera_config = camera.create_still_configuration(main={"size":(4608, 2592)})
-        camera.configure(camera_config)
-        camera.set_controls({"AfMode": controls.AfModeEnum.Continuous})
-        camera.start()
-        camera.capture_file("/home/pi/Pictures/test/sched/frame{}.jpg".format(frame))
-        camera.stop()
+    result = subprocess.call(["/usr/bin/rpicam-still", "-o", filename, "-n", "--verbose=0"])
+    logger.info('call_rpicam_app rpicam-still code %s', result)
 
-#frame = 0
-frame = 1
-s = sched.scheduler()
+    if post_process is not None and callable(post_process):
+        post_process()
 
-def check(meta = 'unset'):
-    print(meta)
-    pprint(datetime.now().timestamp())
-    pprint(s.queue)
+def coordinate(meta = 'unset', s = None):
+    logger.debug('coordinator %s', meta)
 
-def coordinator(meta = 'unset'):
-    print('coordinator {}'.format(meta))
-
-by_morning = tomorrow_morning.timestamp() - datetime.now().timestamp()
-s.enter(by_morning, 1, coordinator, kwargs = {'meta': 'next morning {}'.format(by_morning)})
-
-s.enter(15, 1, check, kwargs = {'meta': 'from 15 seconds ago'})
-for t in times['results'].keys():
-    print(t)
-    print(times['results'][t])
     try:
-        iso = datetime.fromisoformat(times['results'][t])
-        if iso.timestamp() < datetime.now().timestamp():
-            print("In the past")
-        else:
-            now = datetime.now()
-            diff = iso.timestamp() - datetime.now().timestamp()
-            print("scheduled frame {} for {}".format(frame, diff))
-            #s.enterabs(iso.timestamp(), 1, take_pic, kwargs = {'frame': frame})
-            s.enter(diff, 1, check, kwargs = {'meta': "frame {} from timedelta: {}".format(frame, diff)})
-            s.enter(diff, 1, take_pic, kwargs = {'frame': frame, 'meta': 'frame {} from timedelta: {}'.format(frame, diff)})
-            frame = frame + 1
-    except:
-        print("failed on key {}".format(t))
-        continue
+        times = get_times(config['location'], date.today(), config['latitude'], config['longitude'],
+                          config['tzid'], config['is_formatted'])
+    except Exception as e:
+        logger.error('cannot get times from api', e)
+        return
 
-#s.enter(15, 1, check, kwargs={'meta': 'enter with 15'})
-#nxt = datetime.now() + timedelta(seconds=30)
-#s.enterabs(int(nxt.timestamp()), 1, check, kwargs={'meta': 'enterabs with +30'})
+    # don't need the day_length
+    try:
+        del times['day_length']
+    except KeyError as e:
+        # ignore
+        ...
+    sorted_times = dict(sorted(times.items(), key= lambda item: item[1]))
 
-#next_nxt = (datetime.now() + timedelta(seconds=60)).timestamp() - datetime.now().timestamp()
-#print(next_nxt)
-#s.enter(next_nxt, 1, check, kwargs={'meta': 'enter with +60 and goofy calc'})
+    def post_process(correlation_id, key, frame_type, frame):
+        logger.debug('%s post_process for %s type %s frame %s',
+                     correlation_id, key, frame_type, frame)
+        def process():
+            logger.debug('%s process for %s type %s frame %s',
+                         correlation_id, key, frame_type, frame)
 
-s.run()
+            # store the *next* expected frame
+            config[frame_type] = frame + 1
+
+            logger.debug('%s process saving configuration %s', correlation_id, bootstrap_config)
+            save_config(config, bootstrap_config)
+        return process
+
+    # these are the *next* frames in the sequence
+    next_frame = config['next_frame']
+    next_noon_frame = config['next_noon_frame']
+    for t in sorted_times.keys():
+        try:
+            iso = datetime.fromisoformat(times[t])
+            if iso.timestamp() < datetime.now().timestamp():
+                logger.debug('found %s with time %s is in the past', t, times[t])
+            else:
+                name = t + '-' + config['format'].format(next_frame)
+                filename = config['directory'] + name
+                now = datetime.now()
+                diff = iso.timestamp() - datetime.now().timestamp()
+                correlation_id = uuid.uuid4()
+                logger.debug('%s scheduled %s frame %s for delay of %s',
+                             correlation_id, t, next_frame, diff)
+
+                # XXX rpicamp-still takes better pictures, unsure what settings differ
+                #s.enter(diff, 1, take_pic,
+                #        kwargs = {'meta': 'taking photo of {} at {}'.format(t, times[t]),
+                #                  'frame': config['frame']})
+
+                s.enter(diff + 1, 1, call_rpicam_app,
+                        kwargs = {'meta': 'taking rpicam-still of {} at {}'.format(t, times[t]),
+                                  'filename': filename,
+                                  'post_process': post_process(correlation_id, t,
+                                                               'next_frame', next_frame)})
+                next_frame = next_frame + 1
+
+                if t == 'solar_noon':
+                    correlation_id = uuid.uuid4()
+                    logger.debug('%s scheduled noon %s frame %s for delay of %s',
+                                 correlation_id, t, next_noon_frame, diff)
+                    frame = config['directory'] + config['format'].format(next_noon_frame)
+                    s.enter(diff + 1, 1, call_rpicam_app,
+                            kwargs = {
+                                'meta': 'taking rpicam-still of noon {} at {}'.format(t, times[t]),
+                                'filename': frame,
+                                'post_process': post_process(correlation_id, t,
+                                                             'next_noon_frame', next_noon_frame)})
+                    next_noon_frame = next_noon_frame + 1
+        except Exception as e:
+            logger.error('failed on key %s - %s', t, e)
+            continue
+
+def next_coordinate(meta = 'unset', s = None):
+    logger.debug('next_coordinate %s', meta)
+
+    today = date.today()
+    tomorrow = today + timedelta(days=1)
+
+    t = config['reset_time']
+    hour = (lambda: 1, lambda: t[0])[len(t) >= 1 and t[0] <= 11]()
+    minute = (lambda: 0, lambda: t[1])[len(t) >= 2 and t[1] <= 59]()
+    second = (lambda: 0, lambda: t[2])[len(t) >= 3 and t[2] <= 59]()
+    tomorrow_morning = datetime.combine(tomorrow,
+                                        time(hour=hour, minute=minute, second=second))
+
+    next_morning = tomorrow_morning.timestamp() - datetime.now().timestamp()
+    logger.debug('next coorination attempt at %s', next_morning)
+    s.enter(next_morning, 1, coordinate,
+            kwargs = {'meta': 'next morning {}'.format(next_morning), 's': s})
+
+def keepalive(meta = 'unset', s = None):
+    logger.debug('keepalive %s', meta)
+
+    logger.debug('queue depth %s', len(s.queue))
+    logger.debug('queue %s', pformat(s.queue))
+    s.enter(config['keepalive'], 1, keepalive, kwargs = {'meta': 'keepalive run', 's': s})
+
+def main():
+    # XXX take from the command line
+    global config
+    config = load_config(bootstrap_config)
+    logger.debug('main configuration set to %s', config)
+    s = sched.scheduler()
+
+    next_coordinate(meta = 'running coordination setup on initialization', s = s)
+    coordinate(meta = 'initial cooridination run on startup', s = s)
+
+    s.enter(1, 1, keepalive, kwargs = {'meta': 'keepalive run - init', 's': s})
+    s.run()
+
+if __name__ == "__main__":
+    main()
