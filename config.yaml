@@ -1,14 +1,11 @@
-directory: /home/pi/Pictures/test/sched/
+directory: /home/pi/Pictures/sched/
 format: frame{}.jpg
 is_formatted: 0
 keepalive: 3600
 latitude: 39.7592537
 location: https://api.sunrise-sunset.org/json?
 longitude: -105.1230315
-next_frame: 78
-next_noon_frame: 34
-reset_time:
-- 1
-- 0
-- 0
+reset_time: [1, 0, 0]
 tzid: America/Denver
+next_noon_frame: 0
+next_frame: 0

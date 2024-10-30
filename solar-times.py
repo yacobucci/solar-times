@@ -1,10 +1,6 @@
-import json
 import logging
 import sched
 import sys
-import urllib.parse
-import urllib.request
-import uuid
 import yaml
 
 from datetime import date
@@ -13,6 +9,8 @@ from datetime import time
 from datetime import timedelta
 
 from pprint import pformat
+
+from schedulers import photo_all
 
 # XXX holding back until figure out how to approximate rpicam-still
 #from picamera2 import Picamera2
@@ -64,34 +62,6 @@ def save_config(config, filename):
         logger.error('cannot save config file: %s', ex)
         sys.exit(1)
 
-def get_times(location = '', day = date.today(), lat = 0, lng = 0, tzid = '', formatted = 0):
-    params = {
-        'lat': lat,
-        'lng': lng,
-        'date': day.__str__(),
-        'tzid': tzid,
-        'formatted': formatted
-    }
-
-    endpoint = location + urllib.parse.urlencode(params)
-
-    logger.info('calling api endpoint %s for times', endpoint)
-    contents = urllib.request.urlopen(endpoint)
-    if contents.status != 200:
-        # XXX type the exception
-        raise Exception('api called failed, endpoint {} status {}'.format(endpoint,
-                                                                          contents.status))
-
-    if contents.headers['content-type'] != 'application/json':
-        raise Exception("unsupported content-type {} want 'application/json".format(
-               contents.headers['content-type']))
-
-    data = contents.read()
-    times = json.loads(data)
-
-    logger.debug('results: %s', times)
-    return times['results']
-
 # XXX update
 #    logging
 #    post process call
@@ -120,85 +90,8 @@ def call_rpicam_app(meta = 'unset', filename = '', post_process = None):
     if post_process is not None and callable(post_process):
         post_process()
 
-def coordinate(meta = 'unset', s = None):
-    logger.debug('coordinator %s', meta)
-
-    try:
-        times = get_times(config['location'], date.today(), config['latitude'], config['longitude'],
-                          config['tzid'], config['is_formatted'])
-    except Exception as e:
-        logger.error('cannot get times from api', e)
-        return
-
-    # don't need the day_length
-    try:
-        del times['day_length']
-    except KeyError as e:
-        # ignore
-        ...
-    sorted_times = dict(sorted(times.items(), key= lambda item: item[1]))
-
-    def post_process(correlation_id, key, frame_type, frame):
-        logger.debug('%s post_process for %s type %s frame %s',
-                     correlation_id, key, frame_type, frame)
-        def process():
-            logger.debug('%s process for %s type %s frame %s',
-                         correlation_id, key, frame_type, frame)
-
-            # store the *next* expected frame
-            config[frame_type] = frame + 1
-
-            logger.debug('%s process saving configuration %s', correlation_id, bootstrap_config)
-            save_config(config, bootstrap_config)
-        return process
-
-    # these are the *next* frames in the sequence
-    next_frame = config['next_frame']
-    next_noon_frame = config['next_noon_frame']
-    for t in sorted_times.keys():
-        try:
-            iso = datetime.fromisoformat(times[t])
-            if iso.timestamp() < datetime.now().timestamp():
-                logger.debug('found %s with time %s is in the past', t, times[t])
-            else:
-                name = t + '-' + config['format'].format(next_frame)
-                filename = config['directory'] + name
-                now = datetime.now()
-                diff = iso.timestamp() - datetime.now().timestamp()
-                correlation_id = uuid.uuid4()
-                logger.debug('%s scheduled %s frame %s for delay of %s',
-                             correlation_id, t, next_frame, diff)
-
-                # XXX rpicamp-still takes better pictures, unsure what settings differ
-                #s.enter(diff, 1, take_pic,
-                #        kwargs = {'meta': 'taking photo of {} at {}'.format(t, times[t]),
-                #                  'frame': config['frame']})
-
-                s.enter(diff + 1, 1, call_rpicam_app,
-                        kwargs = {'meta': 'taking rpicam-still of {} at {}'.format(t, times[t]),
-                                  'filename': filename,
-                                  'post_process': post_process(correlation_id, t,
-                                                               'next_frame', next_frame)})
-                next_frame = next_frame + 1
-
-                if t == 'solar_noon':
-                    correlation_id = uuid.uuid4()
-                    logger.debug('%s scheduled noon %s frame %s for delay of %s',
-                                 correlation_id, t, next_noon_frame, diff)
-                    frame = config['directory'] + config['format'].format(next_noon_frame)
-                    s.enter(diff + 1, 1, call_rpicam_app,
-                            kwargs = {
-                                'meta': 'taking rpicam-still of noon {} at {}'.format(t, times[t]),
-                                'filename': frame,
-                                'post_process': post_process(correlation_id, t,
-                                                             'next_noon_frame', next_noon_frame)})
-                    next_noon_frame = next_noon_frame + 1
-        except Exception as e:
-            logger.error('failed on key %s - %s', t, e)
-            continue
-
-def next_coordinate(meta = 'unset', s = None):
-    logger.debug('next_coordinate %s', meta)
+def scheduler(meta = 'unset', s = None):
+    logger.debug('scheduler %s', meta)
 
     today = date.today()
     tomorrow = today + timedelta(days=1)
@@ -212,8 +105,10 @@ def next_coordinate(meta = 'unset', s = None):
 
     next_morning = tomorrow_morning.timestamp() - datetime.now().timestamp()
     logger.debug('next coorination attempt at %s', next_morning)
-    s.enter(next_morning, 1, coordinate,
+    s.enter(next_morning, 1, scheduler,
             kwargs = {'meta': 'next morning {}'.format(next_morning), 's': s})
+
+    photo_all('running scheduled job', config, s, call_rpicam_app)
 
 def keepalive(meta = 'unset', s = None):
     logger.debug('keepalive %s', meta)
@@ -229,9 +124,7 @@ def main():
     logger.debug('main configuration set to %s', config)
     s = sched.scheduler()
 
-    next_coordinate(meta = 'running coordination setup on initialization', s = s)
-    coordinate(meta = 'initial cooridination run on startup', s = s)
-
+    scheduler(meta = 'running scheduler setup on initialization', s = s)
     s.enter(1, 1, keepalive, kwargs = {'meta': 'keepalive run - init', 's': s})
     s.run()
 

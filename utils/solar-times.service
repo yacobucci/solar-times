@@ -1,0 +1,9 @@
+[Unit]
+Description=A service that will take photos at various solar times
+After=multi-user.target
+[Service]
+Type=simple
+Restart=always
+ExecStart=/usr/bin/python /home/pi/dev/python/solar-times/solar-times.py
+[Install]
+WantedBy=multi-user.target
