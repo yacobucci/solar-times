@@ -1,3 +1,4 @@
+import argparse
 import logging
 import sched
 import sys
@@ -10,7 +11,8 @@ from datetime import timedelta
 
 from pprint import pformat
 
-from schedulers import photo_all
+from schedulers import *
+from apps import *
 
 # XXX holding back until figure out how to approximate rpicam-still
 #from picamera2 import Picamera2
@@ -25,26 +27,23 @@ from schedulers import photo_all
 
 # XXX Known issues
 # 
-# Restart: if event do or do not fire, a restart can clobber photos
-# Event takes photo 1
-# Writes current frame 1
-# Restarts
-# Next event will be photo and frame 1 as read in from config
-# 
-# Config should always hold the next frame, not the current frame.
-# Implemented potential fix is save_config in the post processing step
-
-# XXX take from CLI
-bootstrap_config = '/home/pi/dev/python/solar-times/config.yaml'
-# XXX take from CLI
-logger_file = '/home/pi/dev/python/solar-times/solar.log'
+# 1 - direct use of picamera2 doesn't take quality photos
+# X2 - scheduler needs a CLI
+# X3 - config file needs a CLI
+# X4 - logger file needs a CLI
+# X5 - make scheduler use a configurable "scheduler" object/action
+#     make a "job" to use either rpicam app or picamera2 function
+#     scheduler gets rules and a job? right now scheduler works at a specific time to call
+#     a function, which calls a camera app. scheduler can use a set of rules to call a cam
+#     app instead.
+# 6 - make scheduler work at an interval or specific times (list)
+# 7 - convert to using type hints
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(filename=logger_file, encoding='utf-8', level=logging.DEBUG,
-                    format='%(levelname)s %(asctime)s : %(message)s')
-logger.debug('logger initialized')
-
+app = None
+job = None
 config = dict()
+
 def load_config(filename):
     try:
         with open(filename, 'r') as f:
@@ -61,34 +60,6 @@ def save_config(config, filename):
     except Exception as ex:
         logger.error('cannot save config file: %s', ex)
         sys.exit(1)
-
-# XXX update
-#    logging
-#    post process call
-#    proper library usage
-#def take_pic(meta = 'unset', filename = ''):
-#    print(meta)
-#    with Picamera2() as camera:
-#        pprint(camera.sensor_modes)
-#
-#        camera_config = camera.create_still_configuration(main={"size":(4608, 2592)})
-#        camera.configure(camera_config)
-#        camera.set_controls({"AfMode": controls.AfModeEnum.Continuous})
-#        camera.start()
-#
-#        camera.capture_file(filename)
-#        camera.stop()
-
-def call_rpicam_app(meta = 'unset', filename = '', post_process = None):
-    logger.debug('call_rpicam_app %s', meta)
-
-    import subprocess
-
-    result = subprocess.call(["/usr/bin/rpicam-still", "-o", filename, "-n", "--verbose=0"])
-    logger.info('call_rpicam_app rpicam-still code %s', result)
-
-    if post_process is not None and callable(post_process):
-        post_process()
 
 def scheduler(meta = 'unset', s = None):
     logger.debug('scheduler %s', meta)
@@ -108,7 +79,7 @@ def scheduler(meta = 'unset', s = None):
     s.enter(next_morning, 1, scheduler,
             kwargs = {'meta': 'next morning {}'.format(next_morning), 's': s})
 
-    photo_all('running scheduled job', config, s, call_rpicam_app)
+    job('running scheduled job = {}'.format(job), config, s, app)
 
 def keepalive(meta = 'unset', s = None):
     logger.debug('keepalive %s', meta)
@@ -118,15 +89,62 @@ def keepalive(meta = 'unset', s = None):
     s.enter(config['keepalive'], 1, keepalive, kwargs = {'meta': 'keepalive run', 's': s})
 
 def main():
-    # XXX take from the command line
+    parser = argparse.ArgumentParser(description='solar-times.py: Art Project - photo scheduler')
+    parser.add_argument(
+            '--app',
+            help='Application to interface with camera hardware. Options: rpicam-still',
+            default='rpicam-still')
+    parser.add_argument(
+            '--log',
+            help='Log file',
+            default='/var/log/solar-times/solar-times.log')
+    parser.add_argument(
+            '--config',
+            help='Configuration file',
+            default='${HOME}/.solar-times/config.yaml')
+    parser.add_argument(
+            '--job',
+            help='Job type to run with each schedule. Options: now, morning, all',
+            default='now')
+
+    args = parser.parse_args()
+
+    logging.basicConfig(filename=args.log, encoding='utf-8', level=logging.DEBUG,
+                        format='%(levelname)s %(asctime)s : %(message)s')
+    logger.debug('logger initialized')
+
+    # load config
     global config
-    config = load_config(bootstrap_config)
+    config = load_config(args.config)
     logger.debug('main configuration set to %s', config)
+
+    # set app
+    global app
+    match args.app:
+        case 'rpicam-still':
+            app = CallRpicamStill(config['cam_options'])
+        case _:
+            print('app {} is unsupported'.format(args.app), file=sys.stderr)
+            exit(1)
+
+    # set job
+    global job
+    match args.job:
+        case 'now':
+            job = photo_now
+        case 'morning':
+            job = photo_morning
+        case 'all':
+            job = photo_all
+        case _:
+            print('job {} is unsupported'.format(args.job), file=sys.stderr)
+            exit(1)
+
     s = sched.scheduler()
 
     scheduler(meta = 'running scheduler setup on initialization', s = s)
     s.enter(1, 1, keepalive, kwargs = {'meta': 'keepalive run - init', 's': s})
     s.run()
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

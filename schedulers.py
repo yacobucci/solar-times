@@ -37,8 +37,81 @@ def get_times(location = '', day = date.today(), lat = 0, lng = 0, tzid = '', fo
     logger.debug('results: %s', times)
     return times['results']
 
+def photo_now(meta = 'unset', config = None, s = None, action = None):
+    logger.debug('photo_now %s', meta)
+
+    action.take_photo('calling action.take_photo NOW', config['directory'] + 'now.jpg',
+                      lambda: True)
+
+def photo_morning(meta = 'unset', config = None, s = None, action = None):
+    logger.debug('photo_morning %s', meta)
+
+    if config is None:
+        raise Exception("must provide a config object")
+    if s is None:
+        raise Exception("must provide a scheduler")
+    #if action is None or not callable(action):
+    if action is None:
+        raise Exception("must provide a callable action")
+
+    try:
+        times = get_times(config['location'], date.today(), config['latitude'], config['longitude'],
+                          config['tzid'], config['is_formatted'])
+    except Exception as e:
+        logger.error('cannot get times from api', e)
+        return
+
+    sunrise = datetime.fromisoformat(times['sunrise'])
+    noon = datetime.fromisoformat(times['solar_noon'])
+
+    duration = noon - sunrise
+    now = datetime.now()
+
+    # schedule sunrise
+    sunrise_file = config['directory'] + 'sunrise_{}.jpg'.format(now.strftime('%Y-%m-%d'))
+    if sunrise.timestamp() > now.timestamp():
+        s.enter(sunrise.timestamp() - now.timestamp(), 1, action.take_photo,
+                kwargs = {'meta': 'calling action.take_photo from photo_morning {} at {}'.format('sunrise',
+                                                                                      sunrise),
+                          'filename': sunrise_file,
+                          'post_process': lambda: True})
+    else:
+        logger.debug('sunrise is in the past waiting for next cycle')
+        return
+
+    early_morning_offset = (duration / 4)
+    mid_morning_offset = (duration / 2)
+    late_morning_offset = (duration / 4) * 3
+
+    early_file = config['directory'] + 'early_{}.jpg'.format(now.strftime('%Y-%m-%d'))
+    s.enter(sunrise.timestamp() + early_morning_offset, 1, action.take_photo,
+            kwargs = {'meta': 'calling action.take_photo from photo_morning {} at {}'.format('early morning',
+                                                                                  'early offset'),
+                      'filename': early_file,
+                      'post_process': lambda: True})
+    mid_file = config['directory'] + 'mid_{}.jpg'.format(now.strftime('%Y-%m-%d'))
+    s.enter(sunrise.timestamp() + mid_morning_offset, 1, action.take_photo,
+            kwargs = {'meta': 'calling action.take_photo from photo_morning {} at {}'.format('mid morning',
+                                                                                  'mid offset'),
+                      'filename': mid_file,
+                      'post_process': lambda: True})
+    late_file = config['directory'] + 'late_{}.jpg'.format(now.strftime('%Y-%m-%d'))
+    s.enter(sunrise.timestamp() + late_morning_offset, 1, action.take_photo,
+            kwargs = {'meta': 'calling action.take_photo from photo_morning {} at {}'.format('late morning',
+                                                                                  'mid offset'),
+                      'filename': late_file,
+                      'post_process': lambda: True})
+    noon_file = config['directory'] + 'noon_{}.jpg'.format(now.strftime('%Y-%m-%d'))
+    s.enter(noon.timestamp() - now.timestamp(), 1, action.take_photo,
+            kwargs = {'meta': 'calling action.take_photo from photo_morning {} at {}'.format('solar noon',
+                                                                                  noon),
+                      'filename': noon_file,
+                      'post_process': lambda: True})
+
+    return
+
 def photo_all(meta = 'unset', config = None, s = None, action = None):
-    logger.debug('coordinator %s', meta)
+    logger.debug('photo_all %s', meta)
 
     if config is None:
         raise Exception("must provide a config object")
@@ -94,8 +167,8 @@ def photo_all(meta = 'unset', config = None, s = None, action = None):
                 logger.debug('%s scheduled %s frame %s for delay of %s',
                              correlation_id, t, next_frame, diff)
 
-                s.enter(diff + 1, 1, action,
-                        kwargs = {'meta': 'calling action {} at {}'.format(t, times[t]),
+                s.enter(diff + 1, 1, action.take_photo,
+                        kwargs = {'meta': 'calling action.take_photo {} at {}'.format(t, times[t]),
                                   'filename': filename,
                                   'post_process': post_process(correlation_id, t,
                                                                'next_frame', next_frame)})
@@ -106,9 +179,9 @@ def photo_all(meta = 'unset', config = None, s = None, action = None):
                     logger.debug('%s scheduled noon %s frame %s for delay of %s',
                                  correlation_id, t, next_noon_frame, diff)
                     frame = config['directory'] + config['format'].format(next_noon_frame)
-                    s.enter(diff + 1, 1, action,
+                    s.enter(diff + 1, 1, action.take_photo,
                             kwargs = {
-                                'meta': 'calling action at noon {} at {}'.format(t, times[t]),
+                                'meta': 'calling action.take_photo at noon {} at {}'.format(t, times[t]),
                                 'filename': frame,
                                 'post_process': post_process(correlation_id, t,
                                                              'next_noon_frame', next_noon_frame)})

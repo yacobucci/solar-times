@@ -1,4 +1,4 @@
-directory: /home/pi/Pictures/test/sched/
+directory: /home/pi/Pictures/sched/
 format: frame{}.jpg
 is_formatted: 0
 keepalive: 3600
@@ -9,3 +9,5 @@ reset_time: [1, 0, 0]
 tzid: America/Denver
 next_noon_frame: 0
 next_frame: 0
+cam_options:
+  index: 0
