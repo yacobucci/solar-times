@@ -73,7 +73,7 @@ def photo_morning(meta = 'unset', config = None, s = None, action = None):
         s.enter(sunrise.timestamp() - now.timestamp(), 1, action.take_photo,
                 kwargs = {'meta': 'calling action.take_photo from photo_morning {} at {}'.format('sunrise',
                                                                                       sunrise),
-                          'filename': sunrise_file,
+                          'output': sunrise_file,
                           'post_process': lambda: True})
     else:
         logger.debug('sunrise is in the past waiting for next cycle')
@@ -87,25 +87,25 @@ def photo_morning(meta = 'unset', config = None, s = None, action = None):
     s.enter(sunrise.timestamp() + early_morning_offset, 1, action.take_photo,
             kwargs = {'meta': 'calling action.take_photo from photo_morning {} at {}'.format('early morning',
                                                                                   'early offset'),
-                      'filename': early_file,
+                      'output': early_file,
                       'post_process': lambda: True})
     mid_file = config['directory'] + 'mid_{}.jpg'.format(now.strftime('%Y-%m-%d'))
     s.enter(sunrise.timestamp() + mid_morning_offset, 1, action.take_photo,
             kwargs = {'meta': 'calling action.take_photo from photo_morning {} at {}'.format('mid morning',
                                                                                   'mid offset'),
-                      'filename': mid_file,
+                      'output': mid_file,
                       'post_process': lambda: True})
     late_file = config['directory'] + 'late_{}.jpg'.format(now.strftime('%Y-%m-%d'))
     s.enter(sunrise.timestamp() + late_morning_offset, 1, action.take_photo,
             kwargs = {'meta': 'calling action.take_photo from photo_morning {} at {}'.format('late morning',
                                                                                   'mid offset'),
-                      'filename': late_file,
+                      'output': late_file,
                       'post_process': lambda: True})
     noon_file = config['directory'] + 'noon_{}.jpg'.format(now.strftime('%Y-%m-%d'))
     s.enter(noon.timestamp() - now.timestamp(), 1, action.take_photo,
             kwargs = {'meta': 'calling action.take_photo from photo_morning {} at {}'.format('solar noon',
                                                                                   noon),
-                      'filename': noon_file,
+                      'output': noon_file,
                       'post_process': lambda: True})
 
     return
@@ -169,7 +169,7 @@ def photo_all(meta = 'unset', config = None, s = None, action = None):
 
                 s.enter(diff + 1, 1, action.take_photo,
                         kwargs = {'meta': 'calling action.take_photo {} at {}'.format(t, times[t]),
-                                  'filename': filename,
+                                  'output': filename,
                                   'post_process': post_process(correlation_id, t,
                                                                'next_frame', next_frame)})
                 next_frame = next_frame + 1
@@ -182,7 +182,7 @@ def photo_all(meta = 'unset', config = None, s = None, action = None):
                     s.enter(diff + 1, 1, action.take_photo,
                             kwargs = {
                                 'meta': 'calling action.take_photo at noon {} at {}'.format(t, times[t]),
-                                'filename': frame,
+                                'output': frame,
                                 'post_process': post_process(correlation_id, t,
                                                              'next_noon_frame', next_noon_frame)})
                     next_noon_frame = next_noon_frame + 1
