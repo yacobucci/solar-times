@@ -3,11 +3,10 @@ format: frame{}.jpg
 is_formatted: 0
 keepalive: 3600
 latitude: 39.7592537
-location: https://api.sunrise-sunset.org/json?
+  #location: https://api.sunrise-sunset.org/json?
+location: https://linear-tangent.xyz:8443/times
 longitude: -105.1230315
 reset_time: [1, 0, 0]
 tzid: America/Denver
-next_noon_frame: 0
-next_frame: 0
 cam_options:
   index: 0

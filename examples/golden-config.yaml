@@ -7,7 +7,5 @@ location: https://api.sunrise-sunset.org/json?
 longitude: -105.1230315
 reset_time: [1, 0, 0]
 tzid: America/Denver
-next_noon_frame: 0
-next_frame: 0
 cam_options:
   index: 0

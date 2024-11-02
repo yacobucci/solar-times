@@ -38,6 +38,9 @@ from apps import *
 #     app instead.
 # 6 - make scheduler work at an interval or specific times (list)
 # 7 - convert to using type hints
+# 8 - make a storage interface to fix circular dependency
+#     separate next frame keys and store them in ~${USER}/.solar-times/pickle.db
+#     store is a separate package and interface the schedulers can import
 
 logger = logging.getLogger(__name__)
 app = None
@@ -51,14 +54,6 @@ def load_config(filename):
             return data
     except Exception as ex:
         logger.error('cannot load config file: %s', ex)
-        sys.exit(1)
-
-def save_config(config, filename):
-    try:
-        with open(filename, 'w') as f:
-            yaml.dump(config, f)
-    except Exception as ex:
-        logger.error('cannot save config file: %s', ex)
         sys.exit(1)
 
 def scheduler(meta = 'unset', s = None):
@@ -79,7 +74,7 @@ def scheduler(meta = 'unset', s = None):
     s.enter(next_morning, 1, scheduler,
             kwargs = {'meta': 'next morning {}'.format(next_morning), 's': s})
 
-    job('running scheduled job = {}'.format(job), config, s, app)
+    job.schedule('running scheduled job = {}'.format(job), config, s, app)
 
 def keepalive(meta = 'unset', s = None):
     logger.debug('keepalive %s', meta)
@@ -131,11 +126,11 @@ def main():
     global job
     match args.job:
         case 'now':
-            job = photo_now
+            job = ScheduleNow()
         case 'morning':
-            job = photo_morning
+            job = ScheduleMorning()
         case 'all':
-            job = photo_all
+            job = ScheduleAll()
         case _:
             print('job {} is unsupported'.format(args.job), file=sys.stderr)
             exit(1)
