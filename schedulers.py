@@ -83,12 +83,14 @@ class ScheduleMorning(SchedulerInterface):
         noon = datetime.fromisoformat(times['solar_noon'])
 
         duration = noon - sunrise
-        now = datetime.now().replace(microsecond=0)
+        now = datetime.now(sunrise.tzinfo).replace(microsecond=0)
+        to_sunrise = sunrise - now
+        to_noon = noon - now
 
         # schedule sunrise
         sunrise_file = config['directory'] + 'sunrise_{}.jpg'.format(now.strftime('%Y-%m-%d'))
         if sunrise.timestamp() >= now.timestamp():
-            s.enter(sunrise.timestamp() - now.timestamp(), 1, action.take_photo,
+            s.enter(to_sunrise.seconds, 1, action.take_photo,
                     kwargs = {'meta': 'calling action.take_photo from photo_morning {} at {}'.
                               format('sunrise', sunrise),
                               'output': sunrise_file,
@@ -98,30 +100,30 @@ class ScheduleMorning(SchedulerInterface):
                          sunrise, now)
             return
 
-        early_morning_offset = (duration / 4)
-        mid_morning_offset = (duration / 2)
-        late_morning_offset = (duration / 4) * 3
+        early_morning_offset = to_sunrise + (duration / 4)
+        mid_morning_offset = to_sunrise + (duration / 2)
+        late_morning_offset = to_sunrise + (duration / 4) * 3
 
         early_file = config['directory'] + 'early_{}.jpg'.format(now.strftime('%Y-%m-%d'))
-        s.enter(sunrise.timestamp() + early_morning_offset, 1, action.take_photo,
+        s.enter(early_morning_offset.seconds, 1, action.take_photo,
                 kwargs = {'meta': 'calling action.take_photo from photo_morning {} at {}'.
                           format('early morning', 'early offset'),
                           'output': early_file,
                           'post_process': lambda: True})
         mid_file = config['directory'] + 'mid_{}.jpg'.format(now.strftime('%Y-%m-%d'))
-        s.enter(sunrise.timestamp() + mid_morning_offset, 1, action.take_photo,
+        s.enter(mid_morning_offset.seconds, 1, action.take_photo,
                 kwargs = {'meta': 'calling action.take_photo from photo_morning {} at {}'.
                           format('mid morning', 'mid offset'),
                           'output': mid_file,
                         'post_process': lambda: True})
         late_file = config['directory'] + 'late_{}.jpg'.format(now.strftime('%Y-%m-%d'))
-        s.enter(sunrise.timestamp() + late_morning_offset, 1, action.take_photo,
+        s.enter(late_morning_offset.seconds, 1, action.take_photo,
                 kwargs = {'meta': 'calling action.take_photo from photo_morning {} at {}'.
                           format('late morning', 'mid offset'),
                           'output': late_file,
                           'post_process': lambda: True})
         noon_file = config['directory'] + 'noon_{}.jpg'.format(now.strftime('%Y-%m-%d'))
-        s.enter(noon.timestamp() - now.timestamp(), 1, action.take_photo,
+        s.enter(to_noon.seconds, 1, action.take_photo,
                 kwargs = {'meta': 'calling action.take_photo from photo_morning {} at {}'.
                           format('solar noon', noon),
                           'output': noon_file,
