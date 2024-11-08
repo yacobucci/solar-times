@@ -1,6 +1,7 @@
 [Unit]
 Description=A service that will take photos at various solar times
-After=multi-user.target
+Wants=network-online.target
+After=multi-user.target network-online.target
 [Service]
 Type=simple
 Restart=always
